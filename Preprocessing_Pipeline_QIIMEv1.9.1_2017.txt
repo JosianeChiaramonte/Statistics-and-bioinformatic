@@ -1,0 +1,84 @@
+#####joining paired ends 
+join_paired_ends.py -f Undetermined_S0_L001_R1_001.fastq -r Undetermined_S0_L001_R2_001.fastq -b Undetermined_S0_L001_I1_001.fastq -o fastq-join_joined
+#####Demultiplexing 
+split_libraries_fastq.py -i fastqjoin.join.fastq -b fastqjoin.join_barcodes.fastq --barcode_type 12 -o split_r3_q20/ -m MappingFile.txt -r 3 -q 20
+
+#####Chimera Check using usearch61 free
+#Identifying Chimeric sequences
+identify_chimeric_seqs.py -i split_r3_q20/seqs.fna -m usearch61 -o split_r3_q20/usearch_checked_chimeras -r SilvaSSURef_115_NR/SSURef_NR99_115_tax_silva_split.fasta
+#filtering chimeric sequences
+filter_fasta.py -f split_r3_q20/seqs.fna -s split_r3_q20/usearch_checked_chimeras/chimeras.txt -n -o split_r3_q20/seqs_filter.fna
+
+#####picking denovo OTUS
+#Picking OTUs
+pick_de_novo_otus.py -i split_r3_q20/seqs_filter.fna -o picked.otus/
+# picking representative OTUs
+pick_rep_set.py -i picked.otus/seqs_filter_otus.txt -f split_r3_q20/seqs_filter.fna -o split_r3_q20/repset.fna -m 'most_abundant'
+
+#####For Silvas's Databank use
+#assigning taxonomy/blast Silvas's Databank
+assign_taxonomy.py -i split_r3_q20/repset.fna -r SilvaSSURef_115_NR/SSURef_NR99_115_tax_silva_split.fasta -t SilvaSSURef_115_NR/SSURef_NR99_115_tax_silva_split.taxonomy -o assign_taxonomy_Silva_115
+#Constructing otu biom file
+make_otu_table.py -i picked.otus/seqs_filter_otus.txt -t assign_taxonomy_Silva_115/repset_tax_assignments.txt -o otu_table_Silvas.biom
+#Biom analysis
+biom summarize-table -i otu_table_Silvas.biom -o otu_table_Silvas_Summary.txt
+#Filtering Eukaryota,Chloroplast,mitochondria from biom file
+filter_taxa_from_otu_table.py -i otu_table_Silvas.biom -o otu_filtered.biom -n Eukaryota,Chloroplast,mitochondria
+
+#####Converting biom file to txt file to use in R
+biom convert -i otu_filtered.biom -o otu_table_input_tax4fun.txt --to-tsv --header-key taxonomy --table-type "OTU table"
+
+#####Phylogenetic Tree
+#Alignment
+align_seqs.py -i repset.fna -o pynast_aligned_seqs 
+# Filtering alignment
+filter_alignment.py -o pynast_aligned_seqs -i pynast_aligned_seqs/repset_aligned.fasta 
+#Building phylogenetic tree  
+make_phylogeny.py -i pynast_aligned_seqs/repset_aligned_pfiltered.fasta -o rep_set.tre 
+
+
+###################################################
+###OTU differentially enriched P Levels Analysis###
+###################################################
+
+#filtering rare OTUs (sequencing noise)
+filter_otus_from_otu_table.py -i otu_filtered.biom -o otu_table_r15.biom -n 15
+
+#filtering IAC Imperador treatments from biom file
+filter_samples_from_otu_table.py -i biom_files/otu_table_r15.biom -o Level_Analysis/IAC/biom_files/otu_table_IAC.biom --mapping_fp mapping_files/MappingFileOriginal_Microh.txt -s "Cultivar:IAC"
+filter_samples_from_otu_table.py -i Level_Analysis/IAC/biom_files/otu_table_IAC.biom -o Level_Analysis/IAC/biom_files/otu_table_IAC_SPT.biom -m mapping_files/MappingFileOriginal_Microh.txt -s  'TP:*,!PR'
+filter_samples_from_otu_table.py -i Level_Analysis/IAC/biom_files/otu_table_IAC.biom -o Level_Analysis/IAC/biom_files/otu_table_IAC_PR.biom -m mapping_files/MappingFileOriginal_Microh.txt -s  'TP:*,!SPT'
+
+#differential enriched OTUs between L0 vs. L100 in both sources of P
+differential_abundance.py -i Level_Analysis/IAC/biom_files/otu_table_IAC_SPT.biom -o Level_Analysis/IAC/TSP/Deseq_L0_L3.txt -m mapping_files/MappingFileOriginal_Microh_P1F1.txt -a DESeq2_nbinom -c Dose -x 0 -y 3 -d
+differential_abundance.py -i Level_Analysis/RPB/biom_files/otu_table_IAC_RPB.biom -o Level_Analysis/IAC/RPB/Deseq_L0_L3.txt -m mapping_files/MappingFileOriginal_Microh_P2F1.txt -a DESeq2_nbinom -c Dose -x 0 -y 3 -d
+
+#filtering Dor-364 treatments from biom file
+
+filter_samples_from_otu_table.py -i biom_files/otu_table_r15.biom -o Level_Analysis/DOR/biom_files/otu_table_DOR.biom --mapping_fp mapping_files/MappingFileOriginal_Microh.txt -s "Cultivar:Dor"
+filter_samples_from_otu_table.py -i Level_Analysis/DOR/biom_files/otu_table_DOR.biom -o Level_Analysis/DOR/biom_files/otu_table_DOR_SPT.biom -m mapping_files/MappingFileOriginal_Microh.txt -s  'TP:*,!PR'
+filter_samples_from_otu_table.py -i Level_Analysis/DOR/biom_files/otu_table_DOR.biom -o Level_Analysis/DOR/biom_files/otu_table_DOR_PR.biom -m mapping_files/MappingFileOriginal_Microh.txt -s  'TP:*,!SPT'
+
+differential_abundance.py -i Level_Analysis/DOR/biom_files/otu_table_DOR_SPT.biom -o Level_Analysis/DOR/TSP/Deseq_L0_L3.txt -m mapping_files/MappingFileOriginal_Microh_P1F2.txt -a DESeq2_nbinom -c Dose -x 0 -y 3 -d
+differential_abundance.py -i Level_Analysis/DOR/biom_files/otu_table_DOR_RPB.biom -o Level_Analysis/DOR/RPB/Deseq_L0_L3.txt -m mapping_files/MappingFileOriginal_Microh_P2F2.txt -a DESeq2_nbinom -c Dose -x 0 -y 3 -d
+
+###################################################
+###P functions differentially enriched Analysis####
+###################################################
+
+#Converting Tax4fun output into biom file
+biom convert -i Phosphorus_functions/DOR_TSP/KEGG_DOR_TSP.txt -o Phosphorus_functions/DOR_TSP/KEGG_DOR_TSP.biom  --table-type "Function table" --to-hdf5
+biom convert -i Phosphorus_functions/DOR_RPB/KEGG_DOR_RPB.txt -o Phosphorus_functions/DOR_RPB/KEGG_DOR_RPB.biom  --table-type "Function table" --to-hdf5
+
+#Filtering P functions from biom file
+#P functions available at suplementary file
+filter_otus_from_otu_table.py -i Phosphorus_functions/DOR_TSP/KEGG_DOR_TSP.biom  -o Phosphorus_functions/DOR_TSP/Phosphorus_functions_DOR_TSP.biom -e Phosphorus_functions/Phosphorus_functions.txt --negate_ids_to_exclude
+filter_otus_from_otu_table.py -i Phosphorus_functions/DOR_RPB/KEGG_DOR_RPB.biom  -o Phosphorus_functions/DOR_RPB/Phosphorus_functions_DOR_RPB.biom -e Phosphorus_functions/Phosphorus_functions.txt --negate_ids_to_exclude
+
+#Acessing differentially enriched P functions
+group_significance.py -i Phosphorus_functions/DOR_TSP/Phosphorus_functions_DOR_TSP.biom -m mapping_files/MappingFileOriginal_Microh.txt -c Dose -s nonparametric_t_test -o Phosphorus_functions/DOR_TSP/KEGG_enriched_DOR_TSP.txt
+group_significance.py -i Phosphorus_functions/DOR_RPB/Phosphorus_functions_DOR_RPB.biom -m mapping_files/MappingFileOriginal_Microh.txt -c Dose -s nonparametric_t_test -o Phosphorus_functions/DOR_RPB/KEGG_enriched_DOR_RPB.txt
+
+#Differentially enriched functions in L0 vs. L100 in TSP and RPB amendments were used to build a heatmap
+
+
